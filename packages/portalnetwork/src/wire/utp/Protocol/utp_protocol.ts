@@ -2,9 +2,9 @@ import { _UTPSocket } from "../Socket/_UTPSocket";
 import { Packet, PacketType } from "..";
 import { debug } from "debug";
 import { PortalNetwork } from "../../..";
-import { Discv5 } from "@chainsafe/discv5";
-import { toHexString } from "@chainsafe/ssz";
-
+import { Discv5, toHex } from "@chainsafe/discv5";
+import { fromHexString, toHexString } from "@chainsafe/ssz";
+import { Block } from '@ethereumjs/block'
 const log = debug("<uTP>");
 
 export class UtpProtocol {
@@ -29,7 +29,11 @@ export class UtpProtocol {
       case PacketType.ST_DATA: await this.handleDataPacket(packet, srcId, msgId); break;
       case PacketType.ST_STATE: await this.handleStatePacket(packet, srcId, msgId); break;
       case PacketType.ST_RESET: await this.handleResetPacket; break;
-      case PacketType.ST_FIN: await this.handleFinPacket(packet, srcId, msgId);
+      case PacketType.ST_FIN: const res = await this.handleFinPacket(packet, srcId, msgId);
+        console.log('received data')
+        console.log(Buffer.from(res).toString())
+        console.log(Block.fromRLPSerializedBlock(Buffer.from(fromHexString(Buffer.from(res).toString()))))
+
       break;
   }
   }
