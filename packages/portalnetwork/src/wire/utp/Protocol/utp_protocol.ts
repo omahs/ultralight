@@ -1,10 +1,13 @@
 import { _UTPSocket } from '../Socket/_UTPSocket'
 import { Packet, PacketType } from '..'
 import { debug } from 'debug'
-import { PortalNetwork } from '../../..'
+import { PortalNetwork, uTPContentType } from '../../..'
 import { Discv5 } from '@chainsafe/discv5'
 import { fromHexString, toHexString } from '@chainsafe/ssz'
-import { getContentIdFromSerializedKey } from '../../../historySubnetwork'
+import {
+  getContentIdFromSerializedKey,
+  HistoryNetworkContentKeyUnionType,
+} from '../../../historySubnetwork'
 
 const log = debug('<uTP>')
 
@@ -54,13 +57,24 @@ export class UtpProtocol {
     // Creates a new uTP socket for remoteAddr
     const socket = new _UTPSocket(this, remoteAddr, 'writing')
     const value = await this.portal.db.get(getContentIdFromSerializedKey(contentKeys[0]))
-    // Loads database content to socket
-    socket.content = fromHexString(value)
-    // Adds this socket to 'sockets' registry, wtih remoteAddr as key
-    this.sockets[remoteAddr] = socket
+    const contentType = HistoryNetworkContentKeyUnionType.deserialize(contentKeys[0])
+    console.log('contentType', contentType)
+    try {
+      const utpcontent = uTPContentType.serialize({
+        selector: 0,
+        value: fromHexString(value),
+      })
+      console.log('encodedUtpContent', utpcontent)
+      // Loads database content to socket
+      socket.content = utpcontent
+      // Adds this socket to 'sockets' registry, wtih remoteAddr as key
+      this.sockets[remoteAddr] = socket
 
-    // Sends Syn Packet to begin uTP connection process using connectionId
-    return this.sockets[remoteAddr].sendSynPacket(connectionId)
+      // Sends Syn Packet to begin uTP connection process using connectionId
+      return this.sockets[remoteAddr].sendSynPacket(connectionId)
+    } catch (err) {
+      console.log(err)
+    }
   }
 
   async initiateConnectionRequest(remoteAddr: string, connectionId: number): Promise<Buffer> {

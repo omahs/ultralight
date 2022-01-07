@@ -27,6 +27,7 @@ import {
   PongMessage,
   ContentMessage,
   PingMessage,
+  uTPContentType,
 } from '../wire'
 import { PortalNetworkEventEmitter } from './types'
 import { PortalNetworkRoutingTable } from '.'
@@ -528,13 +529,19 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
 
   private handleStreamedContent(rcvId: number, content: Uint8Array) {
     this.log(`received all content for ${rcvId}`)
-    const header = BlockHeader.fromRLPSerializedHeader(Buffer.from(content))
-    this.addContentToHistory(
-      1,
-      HistoryNetworkContentTypes.BlockHeader,
-      toHexString(header.hash()),
-      toHexString(content)
-    )
+    const decodedContent = uTPContentType.deserialize(content)
+    switch (decodedContent.selector) {
+      case 0: {
+        const header = BlockHeader.fromRLPSerializedHeader(Buffer.from(decodedContent.value))
+        console.log('header value', toHexString(header.hash()))
+        this.addContentToHistory(
+          1,
+          HistoryNetworkContentTypes.BlockHeader,
+          toHexString(header.hash()),
+          toHexString(decodedContent.value)
+        )
+      }
+    }
   }
 
   // TODO: Decide if we actually need this message since we should never get a CONTENT message in a TALKREQ message packet

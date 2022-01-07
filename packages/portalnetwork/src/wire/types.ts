@@ -158,11 +158,7 @@ export const PortalWireMessageType = new UnionType<Union<MessageTypeUnion>>({
   ],
 })
 
-export const BlockHeaderType = new ContainerType({
-  fields: {
-    blockHeader: ByteList,
-  },
-})
+export const BlockHeaderType = new ListType({ limit: 2048000, elementType: byteType })
 
 export type BlockHeader = Uint8Array
 export const BlockBodyType = BlockHeaderType
