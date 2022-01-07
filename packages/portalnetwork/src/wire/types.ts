@@ -157,3 +157,19 @@ export const PortalWireMessageType = new UnionType<Union<MessageTypeUnion>>({
     AcceptMessageType,
   ],
 })
+
+export const BlockHeaderType = new ContainerType({
+  fields: {
+    blockHeader: ByteList,
+  },
+})
+
+export type BlockHeader = Uint8Array
+export const BlockBodyType = BlockHeaderType
+export type BlockBody = Uint8Array
+
+export type uTPTypeUnion = BlockHeader | BlockBody
+
+export const uTPContentType = new UnionType<Union<uTPTypeUnion>>({
+  types: [BlockHeaderType, BlockBodyType],
+})
