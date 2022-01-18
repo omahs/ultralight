@@ -105,6 +105,7 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
     this.uTP = new UtpProtocol(this)
     this.db = db ?? level()
     ;(this.client as any).sessionService.on('established', (enr: ENR) => {
+      // Check to see if a newly connected discv5 node supports the History Subnetwork
       this.sendPing(enr.nodeId, SubNetworkIds.HistoryNetwork)
     })
     // Start kbucket refresh on 30 second interval
