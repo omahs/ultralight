@@ -820,7 +820,7 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
    * Follows below algorithm to refresh a bucket in the History Network routing table
    * 1: Look at your routing table and select the first N buckets which are not full.
    * Any value of N < 10 is probably fine here.
-   * 2: Randomly pick one of these buckets.  eighting this random selection to prefer
+   * 2: Randomly pick one of these buckets.  Weighting this random selection to prefer
    * "larger" buckets can be done here to prioritize finding the easier to find nodes first.
    * 3: Randomly generate a NodeID that falls within this bucket.
    * Do the random lookup on this node-id.
@@ -829,12 +829,11 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
    * the History Network Routing Table if they support that subnetwork.
    */
   private bucketRefresh = async () => {
-    // TODO Rework bucket refresh logic given most nodes will be at log2distance ~>240
     const notFullBuckets = this.historyNetworkRoutingTable.buckets
       .map((bucket, idx) => {
         return { bucket: bucket, distance: idx }
       })
-      .filter((pair) => pair.bucket.size() < 16)
+      .filter((pair) => pair.distance >= 240 && pair.bucket.size() < 16)
     const randomNotFullBucket = Math.trunc(Math.random() * 10)
     this.log(`Refreshing bucket at distance ${randomNotFullBucket}`)
     const distance = notFullBuckets[randomNotFullBucket].distance
