@@ -31,10 +31,8 @@ export default function DisplayBlock(props: DisplayBlockProps) {
   const block = new Block(blockHeader)
   const json = block.toJSON()
   const header: JsonHeader = json.header!
-
   const obj = Object.entries(header)
   const tx = json.transactions
-
   function handleClick(hash: string) {
     props.findContent(hash)
   }
@@ -56,6 +54,7 @@ export default function DisplayBlock(props: DisplayBlockProps) {
             <Tab>Header</Tab>
             <Tab>Transactions</Tab>
             <Tab>Uncles</Tab>
+            <Tab>JSON</Tab>
           </TabList>
           <TabPanels>
             <TabPanel>
@@ -85,6 +84,7 @@ export default function DisplayBlock(props: DisplayBlockProps) {
               })}
             </TabPanel>
             <TabPanel>Uncles</TabPanel>
+            <TabPanel>{props.rlpHeader}</TabPanel>
           </TabPanels>
         </Tabs>
       </Box>
