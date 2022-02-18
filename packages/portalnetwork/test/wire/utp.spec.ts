@@ -1,5 +1,9 @@
+import { ENR } from '@chainsafe/discv5'
 import { toHexString } from '@chainsafe/ssz'
+import { Multiaddr } from 'multiaddr'
+import PeerId from 'peer-id'
 import tape from 'tape'
+import { PortalNetwork, SubNetworkIds } from '../../src'
 import {
   Packet,
   PacketHeader,
@@ -191,5 +195,33 @@ tape('uTP encoding tests', (t) => {
       'successfully encoded RESET packet'
     )
     st.end()
+  })
+})
+
+// Start the proxy and a CLI node.  Copy ENR and NodeId from CLI node and paste in here.  Then run test.
+
+tape('uTP packet handling', async (t) => {
+  const id = await PeerId.create({ keyType: 'secp256k1' })
+  const enr = ENR.createFromPeerId(id)
+  enr.setLocationMultiaddr(new Multiaddr('/ip4/127.0.0.1/udp/0'))
+  const portal = new PortalNetwork(
+    {
+      enr: enr,
+      peerId: id,
+      multiaddr: new Multiaddr('/ip4/127.0.0.1/udp/0'),
+      transport: 'wss',
+      proxyAddress: `ws://127.0.0.1:5050`,
+    },
+    1
+  )
+  await portal.start()
+  portal.client.addEnr(
+    'enr:-IS4QJjMgpYDTSWA4W4g4pawY2xW_oHC-xQTF0NpDTgB1YzsJY_LtF0imQ7S0VI2rqMhQOcMhgewhzlu6HqFS53JNwMFgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQLA9-i3dQyeTQ0Y8HAO64Zr0iqEYh2VROv2yRLxxINnTIN1ZHCC6rI'
+  )
+
+  t.test('Portal Client Test', (st) => {
+    st.ok(portal.client.isStarted(), 'Portal Client Started')
+    st.ok(portal.sendPing('711005b49b508445c0eb0bbdfc7052b50edd7754f88a1a22650966f2727d751a', SubNetworkIds.HistoryNetwork).then(() => {return true}).catch(() => {return false})
+    , "Ping-Pong successful")  
   })
 })
