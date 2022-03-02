@@ -1,6 +1,12 @@
 import { ENR, fromHex, toHex } from '@chainsafe/discv5'
 import debug from 'debug'
-import { PortalNetwork, getContentId, SubNetworkIds, reassembleBlock } from 'portalnetwork'
+import {
+  PortalNetwork,
+  getContentId,
+  SubNetworkIds,
+  reassembleBlock,
+  HistoryNetworkContentKeyUnionType,
+} from 'portalnetwork'
 import { Block } from '@ethereumjs/block'
 import rlp from 'rlp'
 import { addRLPSerializedBlock } from 'portalnetwork/dist/util'
@@ -44,7 +50,7 @@ export class RPCManager {
         // TODO: Figure out why block body isn't coming back as Uint8Array
         block = reassembleBlock(header as Uint8Array, Uint8Array.from(body as Uint8Array))
         return block
-      } catch { }
+      } catch {}
 
       return 'Block not found'
     },
@@ -65,6 +71,129 @@ export class RPCManager {
         return `internal error`
       }
     },
+    portal_nodeEnr: async () => {
+      this.log(`portal_nodeEnr request received`)
+      const enr = this._client.client.enr.encodeTxt()
+      return enr
+    },
+    portal_findNodes: async (params: [string, number[]]) => {
+      const [dstId, distances] = params
+      if (!isValidId(dstId)) {
+        return 'invalid node id'
+      }
+      this.log(`portal_findNodes request received with these distances ${distances.toString()}`)
+      const res = await this._client.sendFindNodes(
+        dstId,
+        Uint16Array.from(distances),
+        SubNetworkIds.HistoryNetwork
+      )
+      this.log(`response received to findNodes ${res?.toString()}`)
+      return `${res?.total ?? 0} nodes returned`
+    },
+    portal_offer: async (params: [string, string, number]) => {
+      this.log(`portal_offer request received`)
+
+      const [dstId, blockHash, contentType] = params
+      if (!isValidId(dstId) || contentType < 0 || contentType > 2) {
+        this.log('invalid parameters')
+        return
+      }
+      const contentKey = HistoryNetworkContentKeyUnionType.serialize({
+        selector: contentType,
+        value: {
+          chainId: 1,
+          blockHash: fromHex(blockHash.slice(2)),
+        },
+      })
+      const res = await this._client.sendOffer(dstId, [contentKey], SubNetworkIds.HistoryNetwork)
+      this.log(`response received to offer ${res?.toString()}`)
+      return `${shortId(dstId)} ${res ? 'accepted' : 'rejected'} offer`
+    },
+    portal_ping: async (params: [string]) => {
+      const [enr] = params
+      const encodedENR = ENR.decodeTxt(enr)
+      this.log(`portal_ping request received`)
+      await this._client.sendPing(enr, SubNetworkIds.HistoryNetwork)
+      this.log(`TEST PONG received from ${encodedENR.nodeId}`)
+      return `PING/PONG successful with ${encodedENR.nodeId}`
+    },
+    portal_utp_find_content_test: async (params: [string]) => {
+      this.log(`portal_utp_get_test request received`)
+      const [enr] = params
+      const encodedENR = ENR.decodeTxt(enr)
+      await this._client.sendFindContent(
+        encodedENR.nodeId,
+        HistoryNetworkContentKeyUnionType.serialize({
+          selector: 0,
+          value: {
+            chainId: 1,
+            blockHash: Uint8Array.from(
+              fromHex('46b332ceda6777098fe7943929e76a5fcea772a866c0fb1d170ec65c46c7e3ae')
+            ),
+          },
+        }),
+        SubNetworkIds.HistoryNetwork
+      )
+      await this._client.sendFindContent(
+        encodedENR.nodeId,
+        HistoryNetworkContentKeyUnionType.serialize({
+          selector: 1,
+          value: {
+            chainId: 1,
+            blockHash: Uint8Array.from(
+              fromHex('0c1cf9b3d4aa3e20e12b355416a4e3202da53f54eaaafc882a7644e3e68127ec')
+            ),
+          },
+        }),
+        SubNetworkIds.HistoryNetwork
+      )
+      await this._client.sendFindContent(
+        encodedENR.nodeId,
+        HistoryNetworkContentKeyUnionType.serialize({
+          selector: 1,
+          value: {
+            chainId: 1,
+            blockHash: Uint8Array.from(
+              fromHex('ca6063e4d9b37c2777233b723d9b08cf248e34a5ebf7f5720d59323a93eec14f')
+            ),
+          },
+        }),
+        SubNetworkIds.HistoryNetwork
+      )
+      return `Some uTP happened`
+    },
+    portal_utp_offer_test: async (params: [string]) => {
+      this.log(`portal_utp_offer_test request received`)
+      const [enr] = params
+      const encodedENR = ENR.decodeTxt(enr)
+      await this._client.sendOffer(
+        encodedENR.nodeId,
+        [
+          HistoryNetworkContentKeyUnionType.serialize({
+            selector: 1,
+            value: {
+              chainId: 1,
+              blockHash: fromHex(
+                '46b332ceda6777098fe7943929e76a5fcea772a866c0fb1d170ec65c46c7e3ae'
+              ),
+            },
+          }),
+        ],
+        SubNetworkIds.HistoryNetwork
+      )
+      return `Some uTP happened`
+    },
+    // portal_utp_send_syn: async (params: [string]) => {
+    //   const [enr] = params
+    //   const id = ENR.decodeTxt(enr).nodeId
+    //   this.log(`portal_utp_send_syn_test starting`)
+    //   try {
+    //     this._client.sendUtpStreamRequest(id, 1234)
+    //     this.log('syn sent')
+    //   } catch {
+    //     this.log('syn not sent')
+    //   }
+    // },
   }
 
   constructor(client: PortalNetwork) {
