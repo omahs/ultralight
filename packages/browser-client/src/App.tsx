@@ -65,7 +65,7 @@ export const App = () => {
     )
     await node.start()
 
-    node.enableLog('*ultralight*, *portalnetwork*, *<uTP>*')
+    node.enableLog('*ultralight*, *portalnetwork*, *<uTP>*, *discv5*')
   }
 
   const stopNode = async () => {

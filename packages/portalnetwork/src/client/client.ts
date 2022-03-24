@@ -199,7 +199,7 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
   }
 
   /**
-   * Adds a bootnode which triggers a `findNodes` request to the Bootnode tp popute the routing table
+   * Adds a bootnode which triggers a `findNodes` request to the Bootnode to populate the routing table
    * @param bootnode `string` encoded ENR of a bootnode
    * @param networkId network ID of the subnetwork routing table to add the bootnode to
    */
@@ -291,8 +291,10 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
       const res = await this.sendPortalNetworkMessage(dstId, Buffer.from(payload), networkId)
       if (parseInt(res.slice(0, 1).toString('hex')) === MessageCodes.NODES) {
         this.metrics?.nodesMessagesReceived.inc()
-        this.logger(`Received NODES from ${shortId(dstId)}`)
         const decoded = PortalWireMessageType.deserialize(res).value as NodesMessage
+        this.logger(
+          `Received NODES from ${shortId(dstId)} and should receive ${decoded.total} in total`
+        )
         if (decoded) {
           this.logger(`Received ${decoded.enrs.length} ENRs from ${shortId(dstId)}`)
           const routingTable = this.routingTables.get(networkId)
@@ -627,6 +629,7 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
     this.metrics?.totalBytesReceived.inc(message.response.length)
     const srcId = src.nodeId
     this.logger(`TALKRESPONSE message received from ${srcId}`)
+    this.logger(message)
   }
 
   private handlePing = (srcId: string, message: ITalkReqMessage) => {
@@ -656,44 +659,58 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
     this.logger(decoded)
     const payload = decoded.value as FindNodesMessage
     if (payload.distances.length > 0) {
-      const nodesPayload: NodesMessage = {
-        total: 0,
-        enrs: [],
-      }
+      const nodes: Buffer[] = []
       payload.distances.forEach((distance) => {
         if (distance > 0) {
           // Any distance > 0 is technically distance + 1 in the routing table index since a node of distance 1
           // would be in bucket 0
+          this.logger(`Looking for nodes at distance ${distance}`)
           this.routingTables
             .get(toHexString(message.protocol) as SubNetworkIds)!
             .valuesOfDistance(distance + 1)
-            .every((enr) => {
-              // Exclude ENR from resopnse if it matches the requesting node
-              if (enr.nodeId === srcId) return true
-              // Break from loop if total size of NODES payload would exceed 1200 bytes
-              // TODO: Add capability to send multiple NODES messages if size of ENRs exceeds packet size
-              if (Buffer.from(nodesPayload.enrs).length + enr.size > 1200) return false
-              nodesPayload.total++
-              nodesPayload.enrs.push(enr.encode())
-              return true
+            .forEach((enr) => {
+              // Exclude ENR from response if it matches the requesting node
+              if (enr.nodeId === srcId) return
+              nodes.push(enr.encode())
             })
+        } else if (distance === 0) {
+          // Send the client's ENR if a node at distance 0 is requested
+          nodes.push(this.client.enr.encode())
         }
       })
-      // Send the client's ENR if a node at distance 0 is requested
-      if (
-        payload.distances.findIndex((res) => res === 0) !== -1 &&
-        // Verify that total nodes payload is less than 1200 bytes before adding local ENR
-        Buffer.from(nodesPayload.enrs).length < 1200
-      ) {
-        nodesPayload.total++
-        nodesPayload.enrs.push(this.client.enr.encode())
+
+      this.logger(`found ${nodes.length} nodes to send`)
+
+      let totalSize = 0
+      // Determine byte size of all ENRs to be sent
+      nodes.forEach((enr) => (totalSize += enr.length))
+      // Determine total number of messages required to send ENRs
+      const total = Math.floor(totalSize / 200) + 1
+      if (nodes.length > 0) this.logger(`Will send ${total} NODES messages`)
+      while (nodes.length > 0) {
+        const payloadEnrs = []
+        let payloadSize = 0
+        while (payloadSize + nodes[0].length < 200) {
+          this.logger(`next ENR to add is ${nodes[0].length} bytes long`)
+          // Add nodes to current NODES response until MAX_PACKET_SIZE reached
+          payloadSize += nodes[0].length
+          payloadEnrs.unshift(nodes.shift())
+          if (nodes.length === 0) {
+            break
+          }
+        }
+        this.logger(`sending ${payloadEnrs.length} to ${shortId(srcId)}`)
+        const encodedPayload = PortalWireMessageType.serialize({
+          selector: MessageCodes.NODES,
+          value: {
+            total: total,
+            enrs: payloadEnrs as Buffer[],
+          },
+        })
+        this.logger(`sending ${payloadEnrs.length} to ${shortId(srcId)}`)
+        this.client.sendTalkResp(srcId, message.id, encodedPayload)
+        this.metrics?.nodesMessagesSent.inc()
       }
-      const encodedPayload = PortalWireMessageType.serialize({
-        selector: MessageCodes.NODES,
-        value: nodesPayload,
-      })
-      this.client.sendTalkResp(srcId, message.id, encodedPayload)
-      this.metrics?.nodesMessagesSent.inc()
     } else {
       this.client.sendTalkResp(srcId, message.id, Buffer.from([]))
     }

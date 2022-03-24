@@ -50,7 +50,7 @@ const AddressBookManager: React.FC<NodeManagerProps> = ({ portal, network, findi
 
   const handleClick = () => {
     if (enr) {
-      portal.sendPing(enr, network)
+      portal.addBootNode(enr, network)
       setEnr('')
       updateAddressBook()
     }
