@@ -294,7 +294,7 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
         this.logger(`Received NODES from ${shortId(dstId)}`)
         const decoded = PortalWireMessageType.deserialize(res).value as NodesMessage
         if (decoded) {
-          this.logger(`Received ${decoded.total} ENRs from ${shortId(dstId)}`)
+          this.logger(`Received ${decoded.enrs.length} ENRs from ${shortId(dstId)}`)
           const routingTable = this.routingTables.get(networkId)
           decoded.enrs.forEach((enr) => {
             const decodedEnr = ENR.decode(Buffer.from(enr))
