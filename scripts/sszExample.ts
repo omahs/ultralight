@@ -47,11 +47,15 @@ const getProof = (value: number) => {
   }))
 }
 
+const proof1 = getProof(deserializedVector[1])
+const proof2 = getProof(vector[1])
+
 const run = () => {
   console.log(map)
   console.log(`Looking up proof for ${deserializedVector[1]}`)
-  console.log(getProof(deserializedVector[1]))
-  console.log(getProof(vector[1]))
+  console.log(proof1)
+  console.log(proof2)
+  console.log(proof1.every((val, index) => val === proof2[index]))
   
 }
 run()
