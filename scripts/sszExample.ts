@@ -50,6 +50,7 @@ const run = () => {
   console.log(map)
   console.log(`Looking up proof for ${deserializedVector[1]}`)
   console.log(getProof(deserializedVector[1]))
+  console.log(getProof(vector[1]))
 }
 
 run()
