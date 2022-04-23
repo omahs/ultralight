@@ -2,7 +2,6 @@ import * as ssz from '@chainsafe/ssz'
 
 const Uint256 = new ssz.NumberUintType({ byteLength: 32 })
 const exampleType = new ssz.VectorType({ elementType: Uint256, length: 8 })
-
 const n1 = 1111
 const n2 = 2222
 const n3 = 3333
@@ -11,7 +10,6 @@ const n5 = 5555
 const n6 = 6666
 const n7 = 7777
 const n8 = 8888
-
 const vector = [n1, n2, n3, n4, n5, n6, n7, n8]
 const serializedValues = vector.map((n, idx) => {
   return Uint256.serialize(n)
@@ -30,7 +28,7 @@ const map = vector.map((v, idx) => {
   return {
     value: v,
     idx: idx,
-    serialized: serializedValues[idx],
+    serialized:  ssz.toHexString(serializedValues[idx]),
     deserialized: deserializedVector[idx],
     gIndex: leaves[idx],
     proof: proofs[idx].map((p) => {
