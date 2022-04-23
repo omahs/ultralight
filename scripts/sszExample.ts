@@ -14,7 +14,7 @@ const n8 = 8888
 
 const vector = [n1, n2, n3, n4, n5, n6, n7, n8]
 const serializedValues = vector.map((n, idx) => {
-    return Uint256.serialize(n)
+  return Uint256.serialize(n)
 })
 const serializedVector = exampleType.serialize(vector)
 const deserializedVector = exampleType.deserialize(serializedVector)
@@ -33,24 +33,25 @@ const map = vector.map((v, idx) => {
     serialized: serializedValues[idx],
     deserialized: deserializedVector[idx],
     gIndex: leaves[idx],
-    proof:  proofs[idx].map((p) => {
-        return ssz.toHexString(p)
+    proof: proofs[idx].map((p) => {
+      return ssz.toHexString(p)
     }),
   }
 })
 
 const getProof = (value: number) => {
-    const idx = vector.indexOf(value)
-    const gIndex = exampleType.getGindexAtChunkIndex(idx)
-    return tree.getSingleProof(gIndex)
+  const idx = vector.indexOf(value)
+  const gIndex = exampleType.getGindexAtChunkIndex(idx)
+  return (tree.getSingleProof(gIndex).map((p) => {
+      return ssz.toHexString(p)
+  }))
 }
 
 const run = () => {
-
   console.log(map)
   console.log(`Looking up proof for ${deserializedVector[1]}`)
   console.log(getProof(deserializedVector[1]))
   console.log(getProof(vector[1]))
+  
 }
-
 run()
