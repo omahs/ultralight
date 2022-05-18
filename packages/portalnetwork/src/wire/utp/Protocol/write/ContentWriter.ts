@@ -1,6 +1,6 @@
 import { Debugger } from 'debug'
 import { TWO_MINUTES, UtpSocket } from '../..'
-import { sendDataPacket } from '../../Packets/PacketSenders'
+import { sendDataPacket, sendFinPacket } from '../../Packets/PacketSenders'
 import { BasicUtp } from '../BasicUtp'
 
 const _MIN_RTO = TWO_MINUTES
@@ -47,6 +47,7 @@ export default class ContentWriter {
       this.writing = chunks !== this.sentChunks.length
       this.socket.seqNr += 1
     }
+    await sendFinPacket(this.socket)
     return
   }
 

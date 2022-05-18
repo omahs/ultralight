@@ -1,17 +1,13 @@
 import { UtpSocket } from '..'
-import { HistoryNetworkContentKey, HistoryNetworkContentKeyUnionType } from '../../..'
 import ContentReader from '../Protocol/read/ContentReader'
 import ContentWriter from '../Protocol/write/ContentWriter'
 import { sendSynPacket } from '../Packets/PacketSenders'
 import { RequestCode } from './PortalNetworkUTP'
 import { ConnectionState } from '../Socket'
-
-export type ContentRequest = HistoryNetworkContentRequest // , StateNetwork..., etc...
-
-export class HistoryNetworkContentRequest {
+export class ContentRequest<T> {
   requestCode: RequestCode
-  contentKey: HistoryNetworkContentKey
-  contentKeys: HistoryNetworkContentKey[]
+  contentKey: T
+  contentKeys: T[]
   socket: UtpSocket
   sockets: UtpSocket[]
   socketKey: string
@@ -21,16 +17,14 @@ export class HistoryNetworkContentRequest {
 
   constructor(
     requestCode: RequestCode,
-    contentKey: Uint8Array[],
+    contentKeys: T[],
     socket: UtpSocket[],
     socketKey: string,
     content: Uint8Array[] | undefined[]
   ) {
     this.sockets = socket
     //@ts-ignore
-    this.contentKeys = contentKey.map((k) => {
-      return HistoryNetworkContentKeyUnionType.deserialize(Uint8Array.from(k)).value
-    })
+    this.contentKeys = contentKeys
     this.requestCode = requestCode
     this.contentKey = this.contentKeys[0]
     this.content = content[0]
