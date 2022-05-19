@@ -1,14 +1,33 @@
-import { Discv5 } from '@chainsafe/discv5'
-import { Debugger } from 'debug'
+import { NodeId } from '@chainsafe/discv5'
+import { Type } from '@chainsafe/ssz'
+import StrictEventEmitter from 'strict-event-emitter-types/types/src'
 import { EventEmitter } from 'ws'
 import { bufferToPacket, PacketType, randUint16, UtpSocket } from '..'
 import { SubprotocolIds } from '../../..'
-import { PortalNetwork } from '../../..'
-import { BasicUtp } from '../Protocol/BasicUtp'
+// import { BasicUtp } from '../Protocol/BasicUtp'
 import { ContentRequest } from './ContentRequest'
 import PacketHandlers from './PacketHandlers'
 
-type UtpSocketKey = string
+export type UtpSocketKey = string
+export interface IUtpEvents {
+  ContentReady: (chainId: number, blockHash: string, content: Uint8Array) => Promise<void>
+  handleContentRequest: (
+    type: Type<any>,
+    contentKeys: Uint8Array[],
+    peerId: string,
+    connectionId: number,
+    requestCode: RequestCode,
+    contents?: Uint8Array[]
+  ) => Promise<void>
+  send: (
+    dstId: NodeId,
+    payload: Buffer,
+    protocolId: SubprotocolIds,
+    utpMessage?: boolean
+  ) => Promise<void>
+  log: (message: string, extension?: string) => void
+}
+export type UtpEventEmitter = StrictEventEmitter<EventEmitter, IUtpEvents>
 
 export enum RequestCode {
   FOUNDCONTENT_WRITE = 0,
@@ -20,39 +39,42 @@ export enum RequestCode {
 function createSocketKey(remoteAddr: string, sndId: number, rcvId: number) {
   return `${remoteAddr.slice(0, 5)}-${sndId}-${rcvId}`
 }
-export class PortalNetworkUTP extends EventEmitter {
-  portal: PortalNetwork
-  client: Discv5
-  protocol: BasicUtp
+export class PortalNetworkUTP extends (EventEmitter as { new (): UtpEventEmitter }) {
+  // protocol: BasicUtp
   packetHandlers: PacketHandlers
-  openContentRequests: Record<UtpSocketKey, ContentRequest<any>>
-  logger: Debugger
+  openContentRequests: Record<UtpSocketKey, ContentRequest>
   working: boolean
 
-  constructor(portal: PortalNetwork) {
+  constructor() {
+    // eslint-disable-next-line constructor-super
     super()
-    this.portal = portal
-    this.client = portal.client
-    this.protocol = new BasicUtp((peerId: string, msg: Buffer, protocolId: SubprotocolIds) =>
-      this.sendPortalNetworkMessage(peerId, msg, protocolId)
-    )
-    this.logger = portal.logger.extend(`uTP`)
+    // this.protocol = new BasicUtp(this.sendPortalNetworkMessage, this.log)
     this.openContentRequests = {}
     this.working = false
-    this.packetHandlers = new PacketHandlers(this)
+    this.packetHandlers = new PacketHandlers(
+      this.log,
+      this.sendPortalNetworkMessage,
+      (chainId: number, blockHash: string, content: Uint8Array) =>
+        this.emit('ContentReady', chainId, blockHash, content)
+    )
+    this.on('handleContentRequest', this.handleContentRequest)
   }
 
-  createUtpSocket(
+  log(message: string, extension?: string) {
+    this.emit('log', message, extension)
+  }
+
+  async createUtpSocket(
     requestCode: RequestCode,
     peerId: string,
     sndId: number,
     rcvId: number,
     content?: Uint8Array
-  ): UtpSocket | undefined {
+  ): Promise<UtpSocket> {
     let socket: UtpSocket
     switch (requestCode) {
       case RequestCode.FOUNDCONTENT_WRITE:
-        socket = this.protocol.createNewSocket(
+        socket = await UtpSocket.createNewSocket(
           peerId,
           sndId,
           rcvId,
@@ -61,12 +83,13 @@ export class PortalNetworkUTP extends EventEmitter {
           1,
           undefined,
           'write',
-          this.logger,
+          this.log,
+          this.sendPortalNetworkMessage,
           content
         )
         return socket
       case RequestCode.FINDCONTENT_READ:
-        socket = this.protocol.createNewSocket(
+        socket = await UtpSocket.createNewSocket(
           peerId,
           sndId,
           rcvId,
@@ -75,11 +98,12 @@ export class PortalNetworkUTP extends EventEmitter {
           undefined,
           1,
           'read',
-          this.logger
+          this.log,
+          this.sendPortalNetworkMessage
         )
         return socket
       case RequestCode.OFFER_WRITE:
-        socket = this.protocol.createNewSocket(
+        socket = await UtpSocket.createNewSocket(
           peerId,
           sndId,
           rcvId,
@@ -88,12 +112,13 @@ export class PortalNetworkUTP extends EventEmitter {
           undefined,
           1,
           'write',
-          this.logger,
+          this.log,
+          this.sendPortalNetworkMessage,
           content
         )
         return socket
       case RequestCode.ACCEPT_READ:
-        socket = this.protocol.createNewSocket(
+        socket = await UtpSocket.createNewSocket(
           peerId,
           sndId,
           rcvId,
@@ -102,32 +127,30 @@ export class PortalNetworkUTP extends EventEmitter {
           1,
           undefined,
           'read',
-          this.logger
+          this.log,
+          this.sendPortalNetworkMessage
         )
         return socket
+      default:
+        throw new Error('Socket Error')
     }
   }
 
-  async sendPortalNetworkMessage(
-    peerId: string,
-    msg: Buffer,
-    protocolId: SubprotocolIds
-  ): Promise<void> {
-    await this.portal.sendPortalNetworkMessage(peerId, msg, protocolId, true)
+  sendPortalNetworkMessage(peerId: string, msg: Buffer, protocolId: SubprotocolIds): void {
+    this.emit('send', peerId, msg, protocolId, true)
   }
 
   /**
    * Handles a request from Portal Network Client for uTP
-   * @typedef T the type of contentKeys (e.g. <HistoryNetworkContentKey>)
-   * @param deserializer ssz method to deserialize content keys
+   * @param type ssz type of content keys
    * @param contentKeys array of contentKeys for requested content
    * @param peerId Portal Network peer involved in transfer
    * @param connectionId Random Uint16 from Portal Network FOUNDCONTENT or ACCEPT talkResp
-   * @param content SENDER: requested content from db
+   * @param contents SENDER: requested content from db
    */
 
-  async handleContentRequest<T>(
-    deserializer: (serialized: Uint8Array) => any,
+  async handleContentRequest(
+    type: Type<any>,
     contentKeys: Uint8Array[],
     peerId: string,
     connectionId: number,
@@ -138,11 +161,11 @@ export class PortalNetworkUTP extends EventEmitter {
     let rcvId: number
     let socket: UtpSocket
     let socketKey: string
-    let newRequest: ContentRequest<T>
+    let newRequest: ContentRequest
     let sockets: UtpSocket[]
     const _contentKeys = contentKeys.map((k) => {
-      return deserializer(Uint8Array.from(k)).value
-    }) as T[]
+      return type.deserialize(Uint8Array.from(k)).value
+    }) as { chainId: number; blockHash: Uint8Array }[]
     switch (requestCode) {
       case RequestCode.FOUNDCONTENT_WRITE:
         if (contents === undefined) {
@@ -150,36 +173,35 @@ export class PortalNetworkUTP extends EventEmitter {
         }
         sndId = connectionId
         rcvId = connectionId + 1
-        socket = this.createUtpSocket(requestCode, peerId, sndId, rcvId, contents[0])!
-        if (socket === undefined) {
+        try {
+          socket = await this.createUtpSocket(requestCode, peerId, sndId, rcvId, contents[0])
+          socketKey = createSocketKey(peerId, sndId, rcvId)
+          newRequest = new ContentRequest(requestCode, [_contentKeys[0]], [socket], socketKey, [
+            undefined,
+          ])
+          if (this.openContentRequests[socketKey]) {
+            throw new Error(`Request already Open`)
+          } else {
+            this.openContentRequests[socketKey] = newRequest
+            await newRequest.init()
+          }
+        } catch {
           throw new Error('Error in Socket Creation')
-        }
-        socketKey = createSocketKey(peerId, sndId, rcvId)
-        newRequest = new ContentRequest<T>(requestCode, [_contentKeys[0]], [socket], socketKey, [
-          undefined,
-        ])
-        if (this.openContentRequests[socketKey]) {
-          this.logger(`Request already Open`)
-        } else {
-          this.openContentRequests[socketKey] = newRequest
-          this.logger(`Opening request with key: ${socketKey}`)
-          await newRequest.init()
         }
         break
       case RequestCode.FINDCONTENT_READ:
         sndId = connectionId + 1
         rcvId = connectionId
-        socket = this.createUtpSocket(requestCode, peerId, sndId, rcvId)!
+        socket = await this.createUtpSocket(requestCode, peerId, sndId, rcvId)!
         if (socket === undefined) {
           throw new Error('Error in Socket Creation')
         }
         socketKey = createSocketKey(peerId, sndId, rcvId)
         newRequest = new ContentRequest(requestCode, _contentKeys, [socket], socketKey, [undefined])
         if (this.openContentRequests[socketKey]) {
-          this.logger(`Request already Open`)
+          throw new Error(`Request already Open`)
         } else {
           this.openContentRequests[socketKey] = newRequest
-          this.logger(`Opening request with key: ${socketKey}`)
           await newRequest.init()
         }
         break
@@ -190,17 +212,22 @@ export class PortalNetworkUTP extends EventEmitter {
         sndId = connectionId + 1
         rcvId = connectionId
         socketKey = createSocketKey(peerId, sndId, rcvId)
-        sockets = contents.map((content) => {
-          return this.createUtpSocket(requestCode, peerId, sndId, rcvId, content)!
+        sockets = []
+        contents.forEach(async (content) => {
+          const s: UtpSocket = await this.createUtpSocket(
+            requestCode,
+            peerId,
+            sndId,
+            rcvId,
+            content
+          )
+          sockets.push(s)
         })
-
         newRequest = new ContentRequest(requestCode, _contentKeys, sockets, socketKey, contents)
-
         if (this.openContentRequests[socketKey]) {
-          this.logger(`Request already Open`)
+          throw new Error(`Request already Open`)
         } else {
           this.openContentRequests[socketKey] = newRequest
-          this.logger(`Opening request with key: ${socketKey}`)
           await newRequest.init()
         }
 
@@ -210,11 +237,12 @@ export class PortalNetworkUTP extends EventEmitter {
         rcvId = connectionId + 1
         socketKey = createSocketKey(peerId, sndId, rcvId)
         if (this.openContentRequests[socketKey]) {
-          this.logger(`Request already Open`)
+          throw new Error(`Request already Open`)
         } else {
-          this.logger(`Opening request with key: ${socketKey}`)
-          sockets = contentKeys.map(() => {
-            return this.createUtpSocket(requestCode, peerId, sndId, rcvId)!
+          sockets = []
+          contentKeys.forEach(async () => {
+            const s = await this.createUtpSocket(requestCode, peerId, sndId, rcvId)
+            sockets.push(s)
           })
           newRequest = new ContentRequest(requestCode, _contentKeys, sockets, socketKey, [])
           this.openContentRequests[socketKey] = newRequest
@@ -242,8 +270,9 @@ export class PortalNetworkUTP extends EventEmitter {
     } else if (this.openContentRequests[keyD] !== undefined) {
       return keyD
     } else {
-      this.logger(`Cannot Find Open Request for socketKey ${keyA} or ${keyB} or ${keyC} or ${keyD}`)
-      return ''
+      throw new Error(
+        `Cannot Find Open Request for socketKey ${keyA} or ${keyB} or ${keyC} or ${keyD}`
+      )
     }
   }
 
@@ -253,37 +282,43 @@ export class PortalNetworkUTP extends EventEmitter {
     const packet = bufferToPacket(packetBuffer)
     switch (packet.header.pType) {
       case PacketType.ST_SYN:
-        this.logger(
-          `SYN Packet received seqNr: ${packet.header.seqNr} ackNr: ${packet.header.ackNr}`
+        this.emit(
+          'log',
+          `SYN Packet received seqNr: ${packet.header.seqNr} ackNr: ${packet.header.ackNr}`,
+          'uTP'
         )
         requestKey && (await this.packetHandlers.handleSynPacket(request, packet))
         break
       case PacketType.ST_DATA:
-        this.logger(
+        this.emit(
+          'log',
           `DATA Packet received seqNr: ${packet.header.seqNr} ackNr: ${packet.header.ackNr}`
         )
         requestKey && (await this.packetHandlers.handleDataPacket(request, packet))
         break
       case PacketType.ST_STATE:
-        this.logger(
+        this.emit(
+          'log',
           `STATE Packet received seqNr: ${packet.header.seqNr} ackNr: ${packet.header.ackNr}`
         )
         requestKey && (await this.packetHandlers.handleStatePacket(request, packet))
         break
       case PacketType.ST_RESET:
-        this.logger(
+        this.emit(
+          'log',
           `RESET Packet received seqNr: ${packet.header.seqNr} ackNr: ${packet.header.ackNr}`
         )
-        requestKey && (await this.packetHandlers.handleResetPacket(request))
+        delete this.openContentRequests[requestKey]
         break
       case PacketType.ST_FIN:
-        this.logger(
+        this.emit(
+          'log',
           `FIN Packet received seqNr: ${packet.header.seqNr} ackNr: ${packet.header.ackNr}`
         )
         requestKey && (await this.packetHandlers.handleFinPacket(request, packet))
         break
       default:
-        this.logger(`Unknown Packet Type ${packet.header.pType}`)
+        throw new Error(`Unknown Packet Type ${packet.header.pType}`)
     }
   }
 }

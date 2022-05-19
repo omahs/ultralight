@@ -36,16 +36,12 @@ import { Multiaddr } from 'multiaddr'
 //eslint-disable-next-line implicit-dependencies/no-implicit
 import { LevelUp } from 'levelup'
 import { INodeAddress } from '@chainsafe/discv5/lib/session/nodeInfo'
+import { getHistoryNetworkContentId, reassembleBlock } from '../subprotocols/history'
 import {
   HistoryNetworkContentKeyUnionType,
   HistoryNetworkContentTypes,
 } from '../subprotocols/history/types'
 import { BlockHeader } from '@ethereumjs/block'
-import {
-  getHistoryNetworkContentId,
-  reassembleBlock,
-  HistoryNetworkContentKey,
-} from '../subprotocols/history'
 import { ContentLookup } from '../wire'
 import { PortalNetworkUTP, RequestCode } from '../wire/utp/PortalNetworkUtp/PortalNetworkUTP'
 import { WebSocketTransportService } from '../transports/websockets'
@@ -55,9 +51,8 @@ const level = require('level-mem')
 
 const MAX_PACKET_SIZE = 1280
 
-const deserializer = HistoryNetworkContentKeyUnionType.deserialize
-type keyType = HistoryNetworkContentKey
-
+// Placeholder
+const sszType = HistoryNetworkContentKeyUnionType
 export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEventEmitter }) {
   client: Discv5
   routingTables: Map<SubprotocolIds, RoutingTable>
@@ -215,11 +210,15 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
         }
       })
     })*/
-    this.uTP = new PortalNetworkUTP(this)
-    this.uTP.on('contentReady', async (chainId: number, blockHash: string, content: Uint8Array) => {
+    this.uTP = new PortalNetworkUTP()
+    this.uTP.on('ContentReady', (chainId: number, blockHash: string, content: Uint8Array) => {
       const contentType = 0
-      await this.addContentToHistory(chainId, contentType, blockHash, content)
+      this.addContentToHistory(chainId, contentType, blockHash, content)
     })
+    this.uTP.on('send', this.sendPortalNetworkMessage)
+    this.uTP.on('log', (message, extension = '') =>
+      this.logger.extend('uTP').extend(extension)(message)
+    )
     this.db = db ?? level()
     if (metrics) {
       this.metrics = metrics
@@ -463,8 +462,8 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
           case 0: {
             const id = Buffer.from(decoded.value as Uint8Array).readUInt16BE(0)
             this.logger(`received uTP Connection ID ${id}`)
-            await this.uTP.handleContentRequest<keyType>(
-              deserializer,
+            await this.uTP.handleContentRequest(
+              sszType,
               [key],
               dstId,
               id,
@@ -565,8 +564,8 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
             })
           )
 
-          await this.uTP.handleContentRequest<keyType>(
-            deserializer,
+          await this.uTP.handleContentRequest(
+            sszType,
             requestedKeys,
             dstId,
             id,
@@ -871,8 +870,8 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
 
     this.metrics?.acceptMessagesSent.inc()
     const id = randUint16()
-    await this.uTP.handleContentRequest<keyType>(
-      deserializer,
+    await this.uTP.handleContentRequest(
+      sszType,
       desiredContentKeys,
       src.nodeId,
       id,
@@ -973,8 +972,8 @@ export class PortalNetwork extends (EventEmitter as { new (): PortalNetworkEvent
       )
       this.logger(`Generating Random Connection Id...`)
       const _id = randUint16()
-      await this.uTP.handleContentRequest<keyType>(
-        deserializer,
+      await this.uTP.handleContentRequest(
+        sszType,
         [decodedContentMessage.contentKey],
         src.nodeId,
         _id,

@@ -4,10 +4,10 @@ import ContentWriter from '../Protocol/write/ContentWriter'
 import { sendSynPacket } from '../Packets/PacketSenders'
 import { RequestCode } from './PortalNetworkUTP'
 import { ConnectionState } from '../Socket'
-export class ContentRequest<T> {
+export class ContentRequest {
   requestCode: RequestCode
-  contentKey: T
-  contentKeys: T[]
+  contentKey: unknown
+  contentKeys: unknown[]
   socket: UtpSocket
   sockets: UtpSocket[]
   socketKey: string
@@ -17,7 +17,7 @@ export class ContentRequest<T> {
 
   constructor(
     requestCode: RequestCode,
-    contentKeys: T[],
+    contentKeys: unknown[],
     socket: UtpSocket[],
     socketKey: string,
     content: Uint8Array[] | undefined[]
@@ -44,7 +44,7 @@ export class ContentRequest<T> {
         if (this.sockets.length > 0 && this.contentKeys.length > 0 && this.content) {
           this.socket = this.sockets.pop()!
           this.contentKey = this.contentKeys.pop()!
-          writer = await this.socket!.utp.createNewWriter(this.socket, 2)
+          writer = await this.socket!.createNewWriter(this.socket, 2)
           this.writer = writer
           await sendSynPacket(this.socket)
           this.socket.state = ConnectionState.SynSent
