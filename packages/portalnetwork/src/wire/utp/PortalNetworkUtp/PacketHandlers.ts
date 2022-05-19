@@ -1,85 +1,95 @@
+import { NodeId } from '@chainsafe/discv5'
 import { toHexString } from '@chainsafe/ssz'
-import { Debugger } from 'debug'
+import { SubprotocolIds } from '../../../subprotocols'
 import { Packet } from '../Packets'
-import { BasicUtp } from '../Protocol'
+import { sendAckPacket, sendFinPacket, sendSynAckPacket } from '../Packets/PacketSenders'
 import { ConnectionState } from '../Socket'
 import { randUint16 } from '../Utils'
 import { ContentRequest } from './ContentRequest'
-import { PortalNetworkUTP, RequestCode } from './PortalNetworkUTP'
+import { RequestCode } from './PortalNetworkUTP'
 
 export default class PacketHandlers {
-  protocol: PortalNetworkUTP
-  utp: BasicUtp
-  logger: Debugger
-  constructor(protocol: PortalNetworkUTP) {
-    this.protocol = protocol
-    this.logger = protocol.logger
-    this.utp = this.protocol.protocol
+  log: (message: string) => void
+  send: (dstId: NodeId, payload: Buffer, protocolId: SubprotocolIds, utpMessage?: boolean) => void
+  stream: (chainId: number, blockHash: string, content: Uint8Array) => void
+  constructor(
+    log: (message: string, extension?: string) => void,
+    send: (
+      dstId: NodeId,
+      payload: Buffer,
+      protocolId: SubprotocolIds,
+      utpMessage?: boolean
+    ) => void,
+    stream: (chainId: number, blockHash: string, content: Uint8Array) => void
+  ) {
+    this.log = log
+    this.send = send
+    this.stream = stream
   }
 
-  async handleSynPacket(request: ContentRequest<any>, packet: Packet): Promise<void> {
+  async handleSynPacket(request: ContentRequest, packet: Packet): Promise<void> {
     const requestCode = request.requestCode
     let writer
     let reader
     try {
       switch (requestCode) {
         case RequestCode.FOUNDCONTENT_WRITE:
-          this.logger(`SYN received to initiate stream for FINDCONTENT request`)
-          this.logger(`Expected: 1-RANDOM`)
-          this.logger(`Received: ${packet.header.seqNr} - ${packet.header.ackNr}`)
+          this.log(`SYN received to initiate stream for FINDCONTENT request`)
+          this.log(`Expected: 1-RANDOM`)
+          this.log(`Received: ${packet.header.seqNr} - ${packet.header.ackNr}`)
           request.socket.ackNr = packet.header.seqNr
           request.socket.seqNr = randUint16()
-          writer = await this.utp.createNewWriter(request.socket, request.socket.seqNr)
+          writer = await request.socket.createNewWriter(request.socket, request.socket.seqNr)
           request.writer = writer
-          await this.utp.sendSynAckPacket(request.socket)
+          await sendSynAckPacket(request.socket)
           request.socket.nextSeq = request.socket.seqNr + 1
           request.socket.nextAck = packet.header.ackNr + 1
           await request.writer?.start()
           break
         case RequestCode.FINDCONTENT_READ:
-          this.logger(`Why did I get a SYN?`)
+          this.log(`Why did I get a SYN?`)
           break
         case RequestCode.OFFER_WRITE:
-          this.logger(`Why did I get a SYN?`)
+          this.log(`Why did I get a SYN?`)
           break
         case RequestCode.ACCEPT_READ:
-          this.logger('SYN received to initiate stream for OFFER/ACCEPT request')
+          this.log('SYN received to initiate stream for OFFER/ACCEPT request')
           request.socket.ackNr = packet.header.seqNr
           request.socket.nextSeq = 2
           request.socket.nextAck = packet.header.ackNr
-          reader = await this.utp.createNewReader(request.socket, 2)
+          reader = await request.socket.createNewReader(request.socket, 2)
           request.socket.reader = reader
-          await this.utp.handleSynPacket(request.socket, packet)
+          await request.socket.handleSynPacket()
           break
       }
     } catch {
-      this.logger('Request Type Not Implemented')
+      this.log('Request Type Not Implemented')
     }
   }
-  async handleStatePacket(request: ContentRequest<any>, packet: Packet): Promise<void> {
+  async handleStatePacket(request: ContentRequest, packet: Packet): Promise<void> {
     const requestCode = request.requestCode
     switch (requestCode) {
       case RequestCode.FOUNDCONTENT_WRITE:
         break
       case RequestCode.FINDCONTENT_READ:
         if (packet.header.ackNr === 1) {
-          this.logger(
+          this.log(
             `SYN-ACK received for FINDCONTENT request.  Sending SYN-ACK-ACK.  Waiting for DATA.`
           )
-          this.logger(`Expecting: RANDOM-1`)
-          this.logger(`Received: ${packet.header.seqNr} - ${packet.header.ackNr}`)
+          this.log(`Expecting: RANDOM-1`)
+          this.log(`Received: ${packet.header.seqNr} - ${packet.header.ackNr}`)
           const startingSeqNr = request.socket.seqNr + 1
           request.socket.ackNr = packet.header.seqNr
           request.socket.seqNr = 2
           request.socket.nextSeq = packet.header.seqNr + 1
           request.socket.nextAck = packet.header.ackNr + 1
-          const reader = await this.utp.createNewReader(request.socket, startingSeqNr)
+          const reader = await request.socket.createNewReader(request.socket, startingSeqNr)
           request.reader = reader
-          await this.utp.sendStatePacket(request.socket)
+          await sendAckPacket(request.socket)
         } else {
-          this.logger(`Expecting: ${request.socket.nextSeq} - ${request.socket.nextAck}`)
-          this.logger(`Received: ${packet.header.seqNr} - ${packet.header.ackNr}`)
-          this.utp.handleStatePacket(request.socket, packet)
+          this.log(`Expecting: ${request.socket.nextSeq} - ${request.socket.nextAck}`)
+          this.log(`Received: ${packet.header.seqNr} - ${packet.header.ackNr}`)
+          await request.socket.handleStatePacket(packet)
         }
         break
       case RequestCode.OFFER_WRITE:
@@ -91,13 +101,13 @@ export default class PacketHandlers {
           request.socket.nextAck = 2
           request.socket.logger(`SYN-ACK received for OFFERACCEPT request.  Beginning DATA stream.`)
           await request.writer?.start()
-          await this.utp.sendFinPacket(request.socket)
+          await sendFinPacket(request.socket)
         } else if (packet.header.ackNr === request.socket.finNr) {
           request.socket.logger(
             `FIN Packet ACK received.  Closing Socket.  There are ${request.sockets.length} more pieces of content to send.`
           )
           if (request.sockets.length > 0) {
-            this.logger(`Starting next Stream`)
+            this.log(`Starting next Stream`)
             await request.init()
           }
         } else {
@@ -107,46 +117,43 @@ export default class PacketHandlers {
           //  request.socket.seqNr = request.socket.seqNr + 1
           request.socket.nextSeq = packet.header.seqNr + 1
           request.socket.nextAck = packet.header.ackNr + 1
-          await this.utp.handleStatePacket(request.socket, packet)
+          await request.socket.handleStatePacket(packet)
         }
         break
       case RequestCode.ACCEPT_READ:
-        this.logger('Why did I get a STATE packet?')
+        this.log('Why did I get a STATE packet?')
         break
     }
   }
 
-  async handleDataPacket(request: ContentRequest<any>, packet: Packet): Promise<void> {
+  async handleDataPacket(request: ContentRequest, packet: Packet): Promise<void> {
     const requestCode = request.requestCode
     try {
       switch (requestCode) {
         case RequestCode.FOUNDCONTENT_WRITE:
           throw new Error('Why did I get a DATA packet?')
         case RequestCode.FINDCONTENT_READ:
-          await this.utp.handleDataPacket(request.socket, packet)
+          await request.socket.handleDataPacket(packet)
           break
         case RequestCode.OFFER_WRITE:
           throw new Error('Why did I get a DATA packet?')
         case RequestCode.ACCEPT_READ:
-          await this.utp.handleDataPacket(request.socket, packet)
+          await request.socket.handleDataPacket(packet)
           break
       }
     } catch {
-      this.logger('Request Type Not Implemented')
+      throw new Error('Request Type not implemented')
     }
   }
-  async handleResetPacket(request: ContentRequest<any>): Promise<void> {
-    const requestCode = request.requestCode
-    delete this.protocol.openContentRequests[requestCode]
-  }
-  async handleFinPacket(request: ContentRequest<any>, packet: Packet): Promise<void> {
+
+  async handleFinPacket(request: ContentRequest, packet: Packet): Promise<void> {
+    const contentKey = request.contentKey as {
+      chainId: number
+      blockHash: Uint8Array
+    }
     const requestCode = request.requestCode
     const streamer = async (content: Uint8Array) => {
-      this.protocol.emit('contentReady', [
-        request.contentKey.chainId,
-        toHexString(request.contentKey.blockHash),
-        content,
-      ])
+      this.stream(contentKey.chainId, toHexString(contentKey.blockHash), content)
     }
     let content
     try {
@@ -172,8 +179,8 @@ export default class PacketHandlers {
           break
       }
     } catch (err) {
-      this.logger('Error processing FIN packet')
-      this.logger(err)
+      this.log('Error processing FIN packet')
+      this.log((err as any).message)
     }
   }
 }

@@ -9,7 +9,6 @@ export default class ContentReader {
   startingDataNr: number
   nextDataNr: number | undefined
   lastDataNr: number | undefined
-  logger: Debugger
   constructor(socket: UtpSocket, startingDataNr: number) {
     this.socket = socket
     this.packets = new Array<Packet>()
@@ -19,12 +18,11 @@ export default class ContentReader {
     this.startingDataNr = startingDataNr
     this.nextDataNr = startingDataNr
     this.lastDataNr = undefined
-    this.logger = this.socket.logger.extend('READING')
     this.socket.reader = this
   }
 
   async addPacket(packet: Packet): Promise<boolean> {
-    this.logger(`Reading packet S:${packet.header.seqNr} A:${packet.header.ackNr}`)
+    this.socket.logger(`Reading packet S:${packet.header.seqNr} A:${packet.header.ackNr}`)
     this.packets.push(packet)
     if (packet.header.seqNr === this.nextDataNr) {
       this.inOrder.push(packet)
@@ -44,10 +42,7 @@ export default class ContentReader {
     packets.forEach((p) => {
       compiled = Buffer.concat([compiled, Buffer.from(p.payload)])
     })
-    this.logger(`${compiled.length} Bytes Received.`)
-    this.logger(Uint8Array.from(compiled))
-    // await this.streamer(compiled)
-
+    this.socket.logger(`${compiled.length} Bytes Received.`)
     return Uint8Array.from(compiled)
   }
 
@@ -57,10 +52,9 @@ export default class ContentReader {
     })
     try {
       const compiled = await this.compile(sortedPackets)
-      // this.streamer(compiled)
       return compiled
     } catch {
-      this.logger(`Cannot run reader...`)
+      this.socket.logger(`Cannot run reader...`)
     }
   }
 }
